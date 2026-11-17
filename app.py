@@ -117,9 +117,20 @@ with right:
     st.plotly_chart(phase, use_container_width=True)
 
 st.subheader(f'Solutions x(t) at r = {parameter:.4g}')
+density = st.slider('Solution curve density', min_value=15, max_value=75, value=31, step=2,
+                    help='Number of evenly spaced starting values. Extra curves start on both sides of each equilibrium.')
 trajectories = go.Figure()
 failures = 0
-for x0 in np.unique(np.r_[np.linspace(ymin, ymax, 9)[1:-1], initial]):
+visible_roots = [root for root in current or [] if ymin <= root <= ymax]
+starts = list(np.linspace(ymin, ymax, density + 2)[1:-1]) + [initial]
+# Seed both sides locally, without jumping over a neighboring equilibrium.
+for root in visible_roots:
+    neighbors = [abs(root - other) for other in visible_roots if other != root]
+    local_scale = min([(ymax - ymin) * 0.06] + [gap * 0.25 for gap in neighbors])
+    for offset in (-local_scale, -local_scale / 3, local_scale / 3, local_scale):
+        if ymin < root + offset < ymax:
+            starts.append(root + offset)
+for x0 in np.unique(starts):
     def rhs(t, state):
         return [float(f(state[0], parameter))]
     def exit_window(t, state):
@@ -129,10 +140,19 @@ for x0 in np.unique(np.r_[np.linspace(ymin, ymax, 9)[1:-1], initial]):
     result = solve_ivp(rhs, (0, horizon), [x0], events=exit_window, rtol=1e-7, atol=1e-9, max_step=horizon/150)
     failures += not result.success
     highlight = bool(abs(x0-initial) < 1e-10)
-    trajectories.add_trace(go.Scatter(x=result.t, y=result.y[0], mode='lines', name=f'x(0) = {x0:.3g}', line=dict(color='#527cda' if highlight else '#9eabc0', width=3 if highlight else 1), showlegend=highlight))
-trajectories.update_layout(xaxis_title='t', yaxis_title='x(t)', xaxis_range=[0, horizon], yaxis_range=[ymin, ymax], height=340, margin=dict(t=15))
+    trajectories.add_trace(go.Scatter(x=result.t, y=result.y[0], mode='lines', name=f'x(0) = {x0:.3g}', line=dict(color='#527cda' if highlight else '#8194b1', width=3 if highlight else 1.3), showlegend=highlight))
+for root in visible_roots:
+    label = stability(expression, parameter, root)
+    trajectories.add_trace(go.Scatter(
+        x=[0, horizon], y=[root, root], mode='lines',
+        name=f'{label}: x = {root:.4g}',
+        line=dict(color=COLORS[label], width=2.5, dash='solid' if label == 'Stable' else 'dash'),
+        hovertemplate=f'{label} equilibrium<br>x = {root:.5g}<extra></extra>'))
+trajectories.update_layout(xaxis_title='t', yaxis_title='x(t)', xaxis_range=[0, horizon], yaxis_range=[ymin, ymax], height=460, margin=dict(t=20), legend=dict(orientation='h', y=-0.18))
 st.plotly_chart(trajectories, use_container_width=True)
-st.caption('Trajectories stop when they leave the displayed x interval. A highlighted curve uses your chosen initial value.')
+st.caption('Curves start across the x interval and close to both sides of each equilibrium. Green solid lines are stable; red dashed lines are unstable; purple dashed lines are semistable. Curves approach attracting equilibria and move away from repelling ones as t increases. The blue curve uses your chosen initial value; curves stop at the displayed x bounds.')
+if current is None:
+    st.info('Every x is an equilibrium at this r, so all solution curves are constant.')
 if failures:
     st.warning('Some integrations could not finish. Try a shorter time interval or smaller coefficients.')
 
